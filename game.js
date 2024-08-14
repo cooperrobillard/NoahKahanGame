@@ -22,6 +22,7 @@ const config = {
 
 let score = 0;
 let scoreText;
+let fallSpeed = 100; // Initial fall speed
 
 const game = new Phaser.Game(config);
 
@@ -30,6 +31,9 @@ function preload() {
     this.load.image('noah', 'nkhb.png');
     this.load.image('stick1', 'stick1pixel.png');
     this.load.image('stick2', 'stick2pixel.png');
+    this.load.image('leaf1', 'leaf1.png');
+    this.load.image('leaf2', 'leaf2.png');
+    this.load.image('leaf3', 'leaf3.png');
 }
 
 function create() {
@@ -44,12 +48,12 @@ function create() {
     this.basket = this.physics.add.image(this.noah.x, this.noah.y + this.noah.displayHeight * 0.07, 'nkhb.png')
         .setVisible(false)
         .setScale(0.25)
-        .setSize(this.noah.width * 0.25, 10); // Adjust the size to a narrow band
+        .setSize(this.noah.width * 0.25, 10);
 
     // Enable arrow key input
     this.cursors = this.input.keyboard.createCursorKeys();
 
-    // Create a group for the falling sticks
+    // Create a group for the falling sticks and leaves
     this.sticks = this.physics.add.group();
 
     // Display the score
@@ -60,26 +64,38 @@ function create() {
         align: 'right' 
     });
 
-    // Add collider between the basket and the sticks
+    // Add collider between the basket and the sticks/leaves
     this.physics.add.overlap(this.basket, this.sticks, catchStick, null, this);
 
     // Define spawnStick as a method of the scene
     this.spawnStick = () => {
         let x = Phaser.Math.Between(50, this.sys.game.config.width - 50);
-        let stickType = Phaser.Math.RND.pick(['stick1', 'stick2']); // Randomly pick stick1 or stick2
-        let stick = this.sticks.create(x, 0, stickType);
-        stick.setVelocityY(200); // Make the stick fall down
+        let types = [
+            'stick1', 'stick1', 'stick1', 'stick1', // More sticks
+            'stick2', 'stick2', 'stick2', 'stick2', 
+            'leaf1', 'leaf2', 'leaf3' // Fewer leaves
+        ]; 
+        let itemType = Phaser.Math.RND.pick(types);
+        let item = this.sticks.create(x, 0, itemType);
+        item.setVelocityY(fallSpeed); // Use the fallSpeed variable
 
-        // Enlarge only stick2
-        if (stickType === 'stick2') {
-            stick.setScale(1.5); // Make stick2 larger
+        if (itemType === 'stick2') {
+            item.setScale(1.5);
         }
     };
 
-    // Ensure the gameOver function is properly bound to the scene
+    // Spawn sticks and leaves at intervals
+    this.spawnEvent = this.time.addEvent({
+        delay: 1000,
+        callback: this.spawnStick,
+        callbackScope: this,
+        loop: true
+    });
+
+    // Bind gameOver function to the scene
     this.gameOver = () => {
-        this.physics.pause(); // Stop all physics operations
-        this.spawnEvent.remove(); // Stop spawning new sticks
+        this.physics.pause();
+        this.spawnEvent.remove();
 
         // Display Game Over message
         const gameOverText = this.add.text(this.sys.game.config.width / 2, this.sys.game.config.height / 2, 
@@ -90,59 +106,73 @@ function create() {
             align: 'center'
         }).setOrigin(0.5);
 
-        // Add Play Again button
+        // Create a rounded rectangle behind the text
+        const playAgainBackground = this.add.graphics();
+        playAgainBackground.fillStyle(0x48403c, 1); // Black background color
+        playAgainBackground.fillRoundedRect(
+            this.sys.game.config.width / 2 - 100, 
+            this.sys.game.config.height / 2 + 75, 
+            200, 
+            50, 
+            20 // Corner radius
+        );
+
+        // Add Play Again button text
         const playAgainButton = this.add.text(this.sys.game.config.width / 2, this.sys.game.config.height / 2 + 100, 
             'Play Again', {
             fontSize: '32px', 
-            fill: '#ffffff', 
+            fill: '#F3F2E0', 
             fontFamily: 'Arial', 
             align: 'center',
-            backgroundColor: '#000000',
             padding: { x: 20, y: 10 },
         }).setOrigin(0.5)
         .setInteractive()
         .on('pointerdown', () => {
-            this.scene.restart(); // Restart the game when the button is clicked
-            score = 0; // Reset score
+            this.scene.restart();
+            score = 0;
+            fallSpeed = 100; // Reset speed
         });
 
-        // Ensure the sticks currently on screen freeze in place
-        this.sticks.setVelocityY(0); // Set velocity of all sticks to 0, freezing them in place
+        // Freeze the items in place
+        this.sticks.setVelocityY(0);
     };
-
-    // Spawn sticks at intervals
-    this.spawnEvent = this.time.addEvent({
-        delay: 1000, // Spawn a stick every 1000ms (1 second)
-        callback: this.spawnStick,
-        callbackScope: this,
-        loop: true
-    });
 }
 
-function catchStick(basket, stick) {
-    stick.destroy(); // Remove the stick from the game
-    score += 1; // Increase score by 1
-    scoreText.setText('Score: ' + score); // Update the score display
+function catchStick(basket, item) {
+    if (item.texture.key.includes('leaf')) {
+        this.gameOver(); 
+    } else {
+        item.destroy(); 
+        score += 1; 
+        scoreText.setText('Score: ' + score);
+
+        // Increase speed every 10 points
+        if (score % 10 === 0) {
+            fallSpeed += 50; // Increase speed by 50 units
+            
+            // Update the speed of all currently falling items
+            this.sticks.children.iterate((item) => {
+                item.setVelocityY(fallSpeed);
+            });
+        }
+    }
 }
 
 function update() {
-    // Move Noah with arrow keys
-    if (this.cursors.left.isDown) {
-        this.noah.x -= 5; // Move left
-    } else if (this.cursors.right.isDown) {
-        this.noah.x += 5; // Move right
+    if (this.cursors.left.isDown && !this.physics.world.isPaused) {
+        this.noah.x -= 5;
+    } else if (this.cursors.right.isDown && !this.physics.world.isPaused) {
+        this.noah.x += 5;
     }
 
-    // Ensure Noah doesn't go off-screen
     this.noah.x = Phaser.Math.Clamp(this.noah.x, 0, this.sys.game.config.width);
-
-    // Move the basket with Noah
     this.basket.x = this.noah.x - 18;
 
-    // Check if any sticks have reached the bottom of the screen
-    this.sticks.children.iterate((stick) => {
-        if (stick && stick.y > this.sys.game.config.height) {  // Check if stick exists before accessing properties
-            this.gameOver(); // Trigger game over if a stick reaches the bottom
+    this.sticks.children.iterate((item) => {
+        if (item && item.y > this.sys.game.config.height) {
+            if (!item.texture.key.includes('leaf')) {
+                this.gameOver(); 
+            }
         }
     });
 }
